@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>discuss</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://unpkg.com/xlogin"></script>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="favicon.svg">
+  <meta name="theme-color" content="#4f46e5">
+</head>
+<body>
+
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#/" id="brand">
+        <span class="brand-mark">💬</span>
+        <span class="brand-name">discuss</span>
+      </a>
+      <nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
+      <div class="topbar-spacer"></div>
+      <button class="signin" id="signin">Sign in</button>
+      <span class="topbar-id" id="topbar-id" hidden></span>
+    </div>
+  </header>
+
+  <main id="app"></main>
+
+  <footer class="foot">
+    <span>discuss · threaded forum on your <a href="https://solidproject.org">Solid</a> pod</span>
+    <span class="foot-phase">Phase 1 · scaffold (sample data)</span>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
