@@ -331,12 +331,19 @@ async function loadCategories() {
   throw new Error(`GET ${INDEX_URL} → ${res.status}`)
 }
 
+let categoriesPromise = null
 async function ensureCategories() {
-  if (!state.categories) state.categories = await loadCategories()
-  return state.categories
+  if (state.categories) return state.categories
+  // dedupe concurrent callers so a fresh forum only seeds once
+  if (!categoriesPromise) {
+    categoriesPromise = loadCategories()
+      .then(c => { state.categories = c; return c })
+      .finally(() => { categoriesPromise = null })
+  }
+  return categoriesPromise
 }
 
-function resetData() { state.categories = null }
+function resetData() { state.categories = null; categoriesPromise = null }
 
 // topic-list metadata for a category
 async function loadTopics(catId) {
@@ -795,8 +802,14 @@ function wireSignIn() {
   document.addEventListener('xlogout', reload)
 }
 
-// resolve the right pod for the current session, then render fresh
-async function reload() {
+// resolve the right pod for the current session, then render fresh.
+// serialized so bootstrap + an xlogin event can't race two seed attempts.
+let reloadChain = Promise.resolve()
+function reload() {
+  reloadChain = reloadChain.then(doReload, doReload)
+  return reloadChain
+}
+async function doReload() {
   refreshAccount()
   await resolvePod()
   resetData()
