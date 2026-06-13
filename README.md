@@ -13,6 +13,9 @@ Sign in with [xlogin](https://github.com/solid-apps) — Solid-OIDC (WebID) **or
 ## Data model
 
 Shared-pod, multi-user: one pod hosts the forum, any authenticated user can post.
+The forum lives on the **signed-in user's** pod — resolved from the WebID's
+`pim:storage` (falling back to the WebID origin) — so the app works whether it's
+served from the pod itself or from somewhere else (e.g. github.io).
 
 ```
 /public/discuss/index.jsonld                     forum meta + category list

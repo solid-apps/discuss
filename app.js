@@ -12,10 +12,19 @@
 // When there's no writable pod / index (e.g. opened on github.io while signed
 // out) the app drops into a read-only DEMO over the sample data below.
 
-const BASE = `${location.origin}/public/discuss/`
-const INDEX_URL = `${BASE}index.jsonld`
-const ACL_URL = `${BASE}.acl`
-const CATS_BASE = `${BASE}c/`
+// The forum data lives on the SIGNED-IN USER's pod — not on whatever origin is
+// serving the app (it may be hosted off-pod, e.g. github.io). We resolve the pod
+// root from the WebID's pim:storage (falling back to the WebID's origin), then
+// recompute the data URLs. Signed out, we default to this origin for the demo.
+let POD_ROOT, BASE, INDEX_URL, ACL_URL, CATS_BASE
+function setPodRoot(root) {
+  POD_ROOT = String(root).replace(/\/+$/, '') + '/'
+  BASE = `${POD_ROOT}public/discuss/`
+  INDEX_URL = `${BASE}index.jsonld`
+  ACL_URL = `${BASE}.acl`
+  CATS_BASE = `${BASE}c/`
+}
+setPodRoot(location.origin)
 const CTX = { schema: 'https://schema.org/', discuss: 'urn:discuss:' }
 
 // ---------------------------------------------------------------- sample data
@@ -142,6 +151,56 @@ function authFetch(url, opts) {
     return window.xlogin.authFetch(url, opts)
   }
   return fetch(url, opts)
+}
+
+// ------------------------------------------------------------- pod resolution
+const STORAGE_IRI = 'http://www.w3.org/ns/pim/space#storage'
+
+function storageFromJsonld(txt) {
+  let doc; try { doc = JSON.parse(txt) } catch { return null }
+  const nodes = Array.isArray(doc) ? doc : (Array.isArray(doc['@graph']) ? doc['@graph'] : [doc])
+  for (const n of nodes) {
+    for (const k of Object.keys(n || {})) {
+      if (k === STORAGE_IRI || k === 'storage' || k === 'pim:storage' || k === 'space:storage' || k.endsWith('space#storage')) {
+        const v = Array.isArray(n[k]) ? n[k][0] : n[k]
+        const url = typeof v === 'string' ? v : (v && v['@id'])
+        if (url) return url
+      }
+    }
+  }
+  return null
+}
+
+function storageFromTurtle(txt) {
+  const m = txt.match(/(?:pim:storage|space:storage|<http:\/\/www\.w3\.org\/ns\/pim\/space#storage>)\s+<([^>]+)>/)
+  return m ? m[1] : null
+}
+
+// find the pod root for a WebID: prefer pim:storage in the profile, else the origin
+async function podRootForWebId(webId) {
+  try {
+    const res = await authFetch(webId, { headers: { Accept: 'application/ld+json, text/turtle;q=0.9' } })
+    if (res.ok) {
+      const ct = res.headers.get('content-type') || ''
+      const txt = await res.text()
+      const storage = ct.includes('json')
+        ? (storageFromJsonld(txt) || storageFromTurtle(txt))
+        : (storageFromTurtle(txt) || storageFromJsonld(txt))
+      if (storage) return new URL(storage, webId).href
+    }
+  } catch (e) { console.warn('pod resolve failed, using origin', e) }
+  return new URL(webId).origin + '/'
+}
+
+// point the data URLs at the right pod for the current session
+async function resolvePod() {
+  const id = currentIdentity()
+  if (!id || id.type === 'nostr') {
+    // nostr identities have no WebID document to read storage from; use this origin
+    setPodRoot(location.origin)
+    return
+  }
+  setPodRoot(await podRootForWebId(id.id))
 }
 
 function toast(msg) {
@@ -731,9 +790,17 @@ function wireSignIn() {
   document.getElementById('signout').addEventListener('click', () => {
     if (window.xlogin && window.xlogin.logout) window.xlogin.logout()
   })
-  // session changes: forget cached categories (demo→live), refresh, re-render
-  document.addEventListener('xlogin', () => { resetData(); refreshAccount(); render() })
-  document.addEventListener('xlogout', () => { resetData(); refreshAccount(); render() })
+  // session changes: re-resolve the pod, forget caches, re-render
+  document.addEventListener('xlogin', reload)
+  document.addEventListener('xlogout', reload)
+}
+
+// resolve the right pod for the current session, then render fresh
+async function reload() {
+  refreshAccount()
+  await resolvePod()
+  resetData()
+  await render()
 }
 
 // ----------------------------------------------------------------- bootstrap
@@ -741,6 +808,5 @@ window.addEventListener('hashchange', render)
 wireSignIn();
 (async () => {
   try { if (window.xlogin && window.xlogin.ready) await window.xlogin.ready } catch {}
-  refreshAccount()
-  render()
+  reload()
 })()
