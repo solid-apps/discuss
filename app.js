@@ -372,8 +372,17 @@ function categoriesFrom(doc) {
   })).filter(c => c.id && c.name)
 }
 
+const sampleCats = () => SAMPLE.categories.map(c => ({ id: c.id, name: c.name, color: c.color, description: c.description }))
+
 async function loadCategories() {
-  const res = await authFetch(INDEX_URL, { headers: { Accept: 'application/ld+json' } })
+  let res
+  try {
+    res = await authFetch(INDEX_URL, { headers: { Accept: 'application/ld+json' } })
+  } catch (e) {
+    // network/CORS failure (e.g. opened over file:// or off-pod, signed out) → demo
+    if (!currentIdentity()) { state.demo = true; return sampleCats() }
+    throw e
+  }
   if (res.ok) {
     const doc = await res.json()
     state.demo = false
@@ -386,7 +395,7 @@ async function loadCategories() {
       return categoriesFrom(defaultIndex())
     }
     state.demo = true
-    return SAMPLE.categories.map(c => ({ id: c.id, name: c.name, color: c.color, description: c.description }))
+    return sampleCats()
   }
   throw new Error(`GET ${INDEX_URL} → ${res.status}`)
 }
