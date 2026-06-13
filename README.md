@@ -46,6 +46,16 @@ MVP complete — full read/write on a pod. Built in phases:
   `schema:LikeAction` docs, one file per user per post, toggle = PUT/DELETE);
   **new/unread** badges on the topic list (tracked in `localStorage` by reply count,
   no extra fetches).
+- [x] **7. Power features**
+  - **Edit / delete your own posts** — author-gated (compares `schema:author` to your
+    WebID); edits stamp `schema:dateModified`; deleting an OP removes the whole topic.
+  - **Markdown** in post bodies — bold, italic, `code`, fenced blocks, links (http/https
+    only), blockquotes, lists, headings, `@mentions`. Escape-first renderer, no injection.
+  - **Last activity + last poster** per topic row (one extra fetch of the newest reply,
+    found via time-sortable filenames).
+  - **Quote** any post → prefills the composer with an attributed blockquote.
+  - **Category management** — create / rename / recolor categories from the UI (writes
+    `index.jsonld`).
 
 ## Run
 

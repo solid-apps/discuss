@@ -1,21 +1,18 @@
 // discuss — a Discourse-style forum on your Solid pod.
 //
-// Data lives same-origin as wherever the forum is hosted:
 //   /public/discuss/index.jsonld                       forum meta + category list
 //   /public/discuss/.acl                               owner Control; AuthenticatedAgent Append
 //   /public/discuss/c/<cat>/<topicId>/topic.jsonld     the opening post + topic meta
 //   /public/discuss/c/<cat>/<topicId>/<postId>.jsonld  one file per reply (append-only)
+//   /public/discuss/c/<cat>/<topicId>/like_<t>_<u>.jsonld  one file per like
 //
-// One file per reply means many people post concurrently without clobbering —
-// the topic container just collects everyone's docs.
-//
+// One file per reply means many people post concurrently without clobbering.
 // When there's no writable pod / index (e.g. opened on github.io while signed
 // out) the app drops into a read-only DEMO over the sample data below.
 
 // The forum data lives on the SIGNED-IN USER's pod — not on whatever origin is
-// serving the app (it may be hosted off-pod, e.g. github.io). We resolve the pod
-// root from the WebID's pim:storage (falling back to the WebID's origin), then
-// recompute the data URLs. Signed out, we default to this origin for the demo.
+// serving the app (it may be hosted off-pod). We resolve the pod root from the
+// WebID's pim:storage (falling back to the WebID's origin), then recompute URLs.
 let POD_ROOT, BASE, INDEX_URL, ACL_URL, CATS_BASE
 function setPodRoot(root) {
   POD_ROOT = String(root).replace(/\/+$/, '') + '/'
@@ -28,7 +25,6 @@ setPodRoot(location.origin)
 const CTX = { schema: 'https://schema.org/', discuss: 'urn:discuss:' }
 
 // ---------------------------------------------------------------- sample data
-// Used both as the DEMO content and as the seed for a fresh forum's categories.
 const SAMPLE = {
   categories: [
     {
@@ -39,7 +35,7 @@ const SAMPLE = {
           id: 'welcome', title: 'Welcome to discuss 👋', pinned: true,
           author: 'melvin', when: '2d', replyCount: 2,
           posts: [
-            { author: 'melvin', when: '2 days ago', text: "This forum lives entirely on your Solid pod.\n\nCategories hold topics; topics hold a thread of replies — all stored as JSON-LD you own. This is sample data; once it's running on a pod and you sign in, posts persist for real." },
+            { author: 'melvin', when: '2 days ago', text: "This forum lives entirely on your Solid pod.\n\nMarkdown works: **bold**, *italic*, `code`, [links](https://solidproject.org), and:\n\n> blockquotes\n\n- bullet lists\n- one file per reply" },
             { author: 'ana', when: '2 days ago', text: 'Love that it’s just static files on the pod. No server, no database.' },
             { author: 'kenji', when: '1 day ago', text: 'And one file per reply, so multiple people can post without clobbering.' }
           ]
@@ -129,6 +125,71 @@ function slug(s) {
   return String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'topic'
 }
 
+// ------------------------------------------------------------- markdown (safe)
+// Input is HTML-escaped before any transform; we only ever emit a fixed set of
+// tags and links are restricted to http(s)/mailto, so post bodies can't inject.
+function mdInline(escaped) {
+  // split out `code` spans so inline rules never touch their contents
+  return escaped.split(/(`[^`]+`)/).map(part => {
+    if (part.length > 1 && part[0] === '`' && part[part.length - 1] === '`') {
+      return `<code>${part.slice(1, -1)}</code>`
+    }
+    let s = part
+    s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+|mailto:[^)\s]+)\)/g,
+      (_, txt, url) => `<a href="${url}" target="_blank" rel="noopener nofollow">${txt}</a>`)
+    s = s.replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g,
+      (_, pre, url) => `${pre}<a href="${url}" target="_blank" rel="noopener nofollow">${url}</a>`)
+    s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    s = s.replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>')
+    s = s.replace(/(^|\s)@([a-zA-Z0-9._-]{2,})/g, '$1<span class="mention">@$2</span>')
+    return s
+  }).join('')
+}
+
+function renderMarkdown(src) {
+  const lines = String(src || '').split('\n')
+  const inline = s => mdInline(esc(s))
+  const isPlain = l => /^\s*$/.test(l) || /^\s*```/.test(l) || /^\s*>\s?/.test(l) ||
+    /^\s*[-*]\s+/.test(l) || /^\s*\d+\.\s+/.test(l) || /^#{1,3}\s+/.test(l)
+  let html = '', i = 0
+  while (i < lines.length) {
+    const line = lines[i]
+    let m
+    if (/^\s*$/.test(line)) { i++; continue }
+    if (/^\s*```/.test(line)) { // fenced code block
+      i++
+      const buf = []
+      while (i < lines.length && !/^\s*```/.test(lines[i])) { buf.push(lines[i]); i++ }
+      if (i < lines.length) i++
+      html += `<pre class="md-pre"><code>${esc(buf.join('\n'))}</code></pre>`
+      continue
+    }
+    if (/^\s*>\s?/.test(line)) {
+      const buf = []
+      while (i < lines.length && /^\s*>\s?/.test(lines[i])) { buf.push(lines[i].replace(/^\s*>\s?/, '')); i++ }
+      html += `<blockquote>${buf.map(inline).join('<br>')}</blockquote>`; continue
+    }
+    if (/^\s*[-*]\s+/.test(line)) {
+      const buf = []
+      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) { buf.push(lines[i].replace(/^\s*[-*]\s+/, '')); i++ }
+      html += `<ul>${buf.map(x => `<li>${inline(x)}</li>`).join('')}</ul>`; continue
+    }
+    if (/^\s*\d+\.\s+/.test(line)) {
+      const buf = []
+      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) { buf.push(lines[i].replace(/^\s*\d+\.\s+/, '')); i++ }
+      html += `<ol>${buf.map(x => `<li>${inline(x)}</li>`).join('')}</ol>`; continue
+    }
+    if ((m = line.match(/^(#{1,3})\s+(.*)$/))) {
+      const lv = m[1].length + 2
+      html += `<h${lv} class="md-h">${inline(m[2])}</h${lv}>`; i++; continue
+    }
+    const buf = []
+    while (i < lines.length && !isPlain(lines[i])) { buf.push(lines[i]); i++ }
+    html += `<p>${buf.map(inline).join('<br>')}</p>`
+  }
+  return html
+}
+
 // ---------------------------------------------------------------- identity
 function currentIdentity() {
   if (!window.xlogin || !window.xlogin.id) return null
@@ -176,7 +237,6 @@ function storageFromTurtle(txt) {
   return m ? m[1] : null
 }
 
-// find the pod root for a WebID: prefer pim:storage in the profile, else the origin
 async function podRootForWebId(webId) {
   try {
     const res = await authFetch(webId, { headers: { Accept: 'application/ld+json, text/turtle;q=0.9' } })
@@ -192,14 +252,9 @@ async function podRootForWebId(webId) {
   return new URL(webId).origin + '/'
 }
 
-// point the data URLs at the right pod for the current session
 async function resolvePod() {
   const id = currentIdentity()
-  if (!id || id.type === 'nostr') {
-    // nostr identities have no WebID document to read storage from; use this origin
-    setPodRoot(location.origin)
-    return
-  }
+  if (!id || id.type === 'nostr') { setPodRoot(location.origin); return }
   setPodRoot(await podRootForWebId(id.id))
 }
 
@@ -219,7 +274,6 @@ async function loadJson(url) {
   try { return await res.json() } catch { return null }
 }
 
-// returns absolute URLs of contained resources, or null on 404
 async function listContainer(url) {
   const res = await authFetch(url, { headers: { Accept: 'application/ld+json' } })
   if (res.status === 404) return null
@@ -232,6 +286,21 @@ async function listContainer(url) {
     .filter(Boolean)
     .map(ref => { try { return new URL(ref, url).href } catch { return null } })
     .filter(Boolean)
+}
+
+async function put(url, body) {
+  const res = await authFetch(url, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/ld+json' },
+    body: JSON.stringify(body)
+  })
+  if (!res.ok && res.status !== 201) throw new Error(`PUT ${url} → ${res.status}`)
+  return res
+}
+
+async function deleteResource(url) {
+  const r = await authFetch(url, { method: 'DELETE' })
+  if (!r.ok && ![204, 205, 404].includes(r.status)) throw new Error(`DELETE ${url} → ${r.status}`)
 }
 
 function ownerAclId(identity) {
@@ -265,25 +334,16 @@ function discussAcl(ownerId) {
   }
 }
 
+function catToJsonld(c) {
+  return { '@id': `#${c.id}`, 'schema:name': c.name, 'discuss:color': c.color, 'schema:description': c.description }
+}
+
 function defaultIndex() {
   return {
     '@context': CTX, '@id': '#forum', '@type': 'schema:DiscussionForumPosting',
     'schema:name': 'discuss',
-    'discuss:categories': SAMPLE.categories.map(c => ({
-      '@id': `#${c.id}`, 'schema:name': c.name,
-      'discuss:color': c.color, 'schema:description': c.description
-    }))
+    'discuss:categories': SAMPLE.categories.map(catToJsonld)
   }
-}
-
-async function put(url, body) {
-  const res = await authFetch(url, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/ld+json' },
-    body: JSON.stringify(body)
-  })
-  if (!res.ok && res.status !== 201) throw new Error(`PUT ${url} → ${res.status}`)
-  return res
 }
 
 async function seedForum() {
@@ -297,7 +357,7 @@ async function seedForum() {
       'schema:headline': 'Welcome to discuss 👋',
       'schema:author': id.id, 'schema:datePublished': new Date().toISOString(),
       'discuss:pinned': true,
-      'schema:text': 'This forum lives entirely on your Solid pod — categories, topics and replies, all JSON-LD you own.\n\nStart a topic with “+ New topic”, and anyone signed in can reply.'
+      'schema:text': 'This forum lives entirely on your Solid pod — categories, topics and replies, all JSON-LD you own.\n\n**Markdown** works in posts: *italic*, `code`, [links](https://solidproject.org), > quotes and lists.\n\nStart a topic with “+ New topic”, and anyone signed in can reply.'
     })
   } catch (e) { console.warn('welcome seed failed', e) }
 }
@@ -334,7 +394,6 @@ async function loadCategories() {
 let categoriesPromise = null
 async function ensureCategories() {
   if (state.categories) return state.categories
-  // dedupe concurrent callers so a fresh forum only seeds once
   if (!categoriesPromise) {
     categoriesPromise = loadCategories()
       .then(c => { state.categories = c; return c })
@@ -345,11 +404,50 @@ async function ensureCategories() {
 
 function resetData() { state.categories = null; categoriesPromise = null }
 
-// topic-list metadata for a category
+// ---- category management (writes index.jsonld / mutates SAMPLE in demo) ----
+function pickCat(c) { return { id: c.id, name: c.name, color: c.color, description: c.description } }
+function uniqueCatId(base, ids) {
+  if (!ids.has(base)) return base
+  let i = 2; while (ids.has(`${base}-${i}`)) i++; return `${base}-${i}`
+}
+async function saveCategoryList(cats) {
+  const doc = (await loadJson(INDEX_URL)) || defaultIndex()
+  doc['@context'] = doc['@context'] || CTX
+  doc['discuss:categories'] = cats.map(catToJsonld)
+  await put(INDEX_URL, doc)
+}
+async function addCategory({ name, color, description }) {
+  if (state.demo) {
+    const id = uniqueCatId(slug(name), new Set(SAMPLE.categories.map(c => c.id)))
+    SAMPLE.categories.push({ id, name, color, description, topics: [] })
+    return id
+  }
+  const cur = (state.categories || []).map(pickCat)
+  const id = uniqueCatId(slug(name), new Set(cur.map(c => c.id)))
+  await saveCategoryList([...cur, { id, name, color, description }])
+  return id
+}
+async function updateCategory(id, fields) {
+  if (state.demo) {
+    const c = SAMPLE.categories.find(x => x.id === id); if (c) Object.assign(c, fields)
+    return
+  }
+  await saveCategoryList((state.categories || []).map(c => c.id === id ? { ...pickCat(c), ...fields } : pickCat(c)))
+}
+
+// ------------------------------------------------------------- topics / posts
+const replyFilesOf = urls => (urls || []).filter(u => {
+  const n = u.split('/').pop()
+  return u.endsWith('.jsonld') && n !== 'topic.jsonld' && !n.startsWith('like_')
+})
+
 async function loadTopics(catId) {
   if (state.demo) {
     const c = SAMPLE.categories.find(x => x.id === catId)
-    return c ? c.topics.map(t => ({ ...t, catId })) : []
+    return c ? c.topics.map(t => ({
+      ...t, catId, lastAuthor: t.posts[t.posts.length - 1]?.author || t.author,
+      lastWhen: t.when, lastDate: t.date || ''
+    })) : []
   }
   const base = `${CATS_BASE}${encodeURIComponent(catId)}/`
   const entries = await listContainer(base)
@@ -362,18 +460,26 @@ async function loadTopics(catId) {
       loadJson(`${dir}topic.jsonld`)
     ])
     if (!meta) return null
-    const replies = (inner || []).filter(u => {
-      const n = u.split('/').pop()
-      return u.endsWith('.jsonld') && n !== 'topic.jsonld' && !n.startsWith('like_')
-    })
+    const replies = replyFilesOf(inner)
+    // newest reply = lexicographically largest filename (ids are time-sortable)
+    let lastDate = meta['schema:datePublished'] || ''
+    let lastAuthor = displayName(meta['schema:author'])
+    if (replies.length) {
+      const latest = replies.slice().sort((a, b) => a.split('/').pop().localeCompare(b.split('/').pop())).pop()
+      const d = await loadJson(latest)
+      if (d) {
+        lastDate = d['schema:datePublished'] || lastDate
+        lastAuthor = displayName(d['schema:author'] || d.author)
+      }
+    }
     return {
       id: decodeURIComponent(id), catId,
       title: meta['schema:headline'] || meta.headline || '(untitled)',
       author: displayName(meta['schema:author']),
-      when: relTime(meta['schema:datePublished']),
       date: meta['schema:datePublished'] || '',
       pinned: !!meta['discuss:pinned'],
-      replyCount: replies.length
+      replyCount: replies.length,
+      lastDate, lastAuthor, lastWhen: relTime(lastDate)
     }
   }))
   return topics.filter(Boolean)
@@ -389,12 +495,10 @@ async function loadTopic(catId, topicId) {
   const meta = await loadJson(`${dir}topic.jsonld`)
   if (!meta) return null
   const inner = (await listContainer(dir).catch(() => [])) || []
-  const files = inner.filter(u => u.endsWith('.jsonld'))
   const nameOf = u => u.split('/').pop()
-  const replyUrls = files.filter(u => { const n = nameOf(u); return n !== 'topic.jsonld' && !n.startsWith('like_') })
-  const likeUrls = files.filter(u => nameOf(u).startsWith('like_'))
+  const replyUrls = replyFilesOf(inner)
+  const likeUrls = inner.filter(u => u.endsWith('.jsonld') && nameOf(u).startsWith('like_'))
 
-  // tally likes: schema:object → { count, mine }
   const myId = currentIdentity()?.id
   const likeDocs = (await Promise.all(likeUrls.map(loadJson))).filter(Boolean)
   const tally = {}
@@ -412,20 +516,24 @@ async function loadTopic(catId, topicId) {
     if (!d) return null
     const id = nameOf(u).replace(/\.jsonld$/, '')
     return {
-      id,
+      id, url: u,
       author: displayName(d['schema:author'] || d.author),
+      authorId: d['schema:author'] || d.author || '',
       text: d['schema:text'] || d.text || '',
       date: d['schema:datePublished'] || d.datePublished || '',
       when: relTime(d['schema:datePublished'] || d.datePublished),
+      edited: !!(d['schema:dateModified'] || d.dateModified),
       ...likeInfo(id)
     }
   }))).filter(Boolean).sort((a, b) => (a.date || '').localeCompare(b.date || ''))
   const op = {
-    id: 'op',
+    id: 'op', url: `${dir}topic.jsonld`,
     author: displayName(meta['schema:author']),
+    authorId: meta['schema:author'] || '',
     text: meta['schema:text'] || '',
     when: relTime(meta['schema:datePublished']),
     date: meta['schema:datePublished'] || '',
+    edited: !!(meta['schema:dateModified']),
     ...likeInfo('op')
   }
   return {
@@ -436,14 +544,12 @@ async function loadTopic(catId, topicId) {
   }
 }
 
-// toggle a like as an append-only LikeAction doc (one file per user per target)
 async function toggleLike(catId, topicId, target, liked) {
   const id = currentIdentity()
   if (!id) throw new Error('not signed in')
   const url = `${CATS_BASE}${encodeURIComponent(catId)}/${encodeURIComponent(topicId)}/like_${target}_${slug(id.id)}.jsonld`
   if (liked) {
-    const res = await authFetch(url, { method: 'DELETE' })
-    if (!res.ok && res.status !== 404) throw new Error(`DELETE → ${res.status}`)
+    await deleteResource(url)
   } else {
     await put(url, {
       '@context': CTX, '@type': 'schema:LikeAction',
@@ -474,6 +580,24 @@ async function createReply(catId, topicId, text) {
     'schema:author': id.id, 'schema:text': text,
     'schema:datePublished': new Date().toISOString()
   })
+}
+
+// edit a post in place (preserves author/date, stamps dateModified)
+async function savePost(url, fields) {
+  const doc = (await loadJson(url))
+  if (!doc) throw new Error('post not found')
+  Object.assign(doc, fields, { 'schema:dateModified': new Date().toISOString() })
+  await put(url, doc)
+}
+
+// delete a whole topic: remove every file in its container, then the container
+async function deleteTopic(catId, topicId) {
+  const dir = `${CATS_BASE}${encodeURIComponent(catId)}/${encodeURIComponent(topicId)}/`
+  const inner = (await listContainer(dir).catch(() => [])) || []
+  for (const u of inner) {
+    if (u.replace(/\/$/, '') !== dir.replace(/\/$/, '')) await deleteResource(u).catch(() => {})
+  }
+  await deleteResource(dir).catch(() => {})
 }
 
 // --------------------------------------------------------------------- router
@@ -524,11 +648,37 @@ async function render() {
 const findCategory = id => (state.categories || []).find(c => c.id === id)
 
 // ----------------------------------------------------------------- view: cats
+function categoryForm({ name = '', color = '#4f46e5', description = '' } = {}, onSave, onCancel) {
+  const form = el(`
+    <div class="catform">
+      <div class="catform-row">
+        <input class="cf-color" type="color" value="${esc(color)}" title="Category colour">
+        <input class="cf-name" type="text" placeholder="Category name" maxlength="60" value="${esc(name)}">
+      </div>
+      <input class="cf-desc" type="text" placeholder="Short description" maxlength="160" value="${esc(description)}">
+      <div class="compose-bar">
+        <button class="btn cf-save">Save</button>
+        <button class="btn btn-ghost cf-cancel">Cancel</button>
+      </div>
+    </div>`)
+  form.querySelector('.cf-cancel').addEventListener('click', onCancel)
+  form.querySelector('.cf-save').addEventListener('click', async () => {
+    const name = form.querySelector('.cf-name').value.trim()
+    if (!name) { form.querySelector('.cf-name').focus(); return }
+    const data = {
+      name, color: form.querySelector('.cf-color').value,
+      description: form.querySelector('.cf-desc').value.trim()
+    }
+    const save = form.querySelector('.cf-save'); save.disabled = true; save.textContent = 'Saving…'
+    try { await onSave(data) } catch (e) { toast('Save failed: ' + e.message); save.disabled = false; save.textContent = 'Save' }
+  })
+  return form
+}
+
 async function renderCategories(token) {
   setCrumbs([{ label: 'Categories' }])
   showLoading('categories')
   const cats = state.categories || []
-  // topic counts per category (skip in demo — use sample lengths)
   const counts = await Promise.all(cats.map(async c => {
     if (state.demo) {
       const s = SAMPLE.categories.find(x => x.id === c.id)
@@ -539,13 +689,30 @@ async function renderCategories(token) {
   }))
   if (token !== renderToken) return
 
+  const canManage = !!currentIdentity()
   app.innerHTML = ''
   app.appendChild(el(demoNotice() || '<span></span>'))
   app.appendChild(el(`
     <div class="page-head">
       <h1>Categories</h1>
       <p>Pick a place to read or start a discussion.</p>
+      <span class="spacer"></span>
+      <button class="btn" id="new-cat" ${canManage ? '' : 'disabled title="Sign in to manage categories"'}>+ New category</button>
     </div>`))
+
+  const newCatSlot = el('<div></div>')
+  app.appendChild(newCatSlot)
+  if (canManage) {
+    document.getElementById('new-cat').addEventListener('click', () => {
+      if (newCatSlot.firstChild) { newCatSlot.innerHTML = ''; return }
+      newCatSlot.appendChild(categoryForm({}, async data => {
+        const id = await addCategory(data)
+        resetData(); await render(); toast('Category added')
+        location.hash = `#/${encodeURIComponent(id)}`
+      }, () => { newCatSlot.innerHTML = '' }))
+      newCatSlot.querySelector('.cf-name').focus()
+    })
+  }
 
   const list = el('<div class="list"></div>')
   cats.forEach((cat, i) => {
@@ -557,10 +724,24 @@ async function renderCategories(token) {
           <div class="cat-desc">${esc(cat.description)}</div>
         </div>
         <div class="cat-meta"><b>${counts[i]}</b> topics</div>
+        ${canManage ? '<button class="icon-btn cat-edit" title="Edit category">✎</button>' : ''}
       </div>`)
     const go = () => { location.hash = `#/${encodeURIComponent(cat.id)}` }
-    row.addEventListener('click', go)
+    row.addEventListener('click', e => { if (!e.target.closest('.cat-edit') && !e.target.closest('.catform')) go() })
     row.addEventListener('keydown', e => { if (e.key === 'Enter') go() })
+    const editBtn = row.querySelector('.cat-edit')
+    if (editBtn) {
+      editBtn.addEventListener('click', e => {
+        e.stopPropagation()
+        if (row.querySelector('.catform')) { render(); return }
+        const form = categoryForm(cat, async data => {
+          await updateCategory(cat.id, data)
+          resetData(); await render(); toast('Category updated')
+        }, () => render())
+        row.appendChild(form)
+        form.querySelector('.cf-name').focus()
+      })
+    }
     list.appendChild(row)
   })
   app.appendChild(list)
@@ -575,7 +756,7 @@ async function renderTopics(catId, token) {
   let topics
   try { topics = await loadTopics(catId) } catch (e) { topics = [] }
   if (token !== renderToken) return
-  topics.sort((a, b) => (b.pinned - a.pinned) || (b.date || '').localeCompare(a.date || ''))
+  topics.sort((a, b) => (b.pinned - a.pinned) || (b.lastDate || '').localeCompare(a.lastDate || ''))
 
   const signedIn = !!currentIdentity()
   app.innerHTML = ''
@@ -589,11 +770,10 @@ async function renderTopics(catId, token) {
     </div>`))
   app.appendChild(el(`<div class="cat-desc" style="margin:-8px 0 18px">${esc(cat.description)}</div>`))
 
-  // inline new-topic form (hidden until the button is pressed)
   const form = el(`
     <div class="newtopic" hidden>
       <input class="nt-title" type="text" placeholder="Topic title" maxlength="140">
-      <textarea class="nt-body" placeholder="Write the first post…"></textarea>
+      <textarea class="nt-body" placeholder="Write the first post…  (markdown supported)"></textarea>
       <div class="compose-bar">
         <button class="btn nt-create">Create topic</button>
         <button class="btn btn-ghost nt-cancel">Cancel</button>
@@ -615,7 +795,7 @@ async function renderTopics(catId, token) {
         if (state.demo) {
           tid = `${slug(title)}-${newId()}`
           const s = SAMPLE.categories.find(x => x.id === catId)
-          s.topics.unshift({ id: tid, title, pinned: false, author: 'me', when: 'just now', replyCount: 0,
+          s.topics.unshift({ id: tid, title, pinned: false, author: 'me', when: 'just now', replyCount: 0, date: '',
             posts: [{ author: displayName(currentIdentity()?.id) || 'me', when: 'just now', text: body, unsaved: true }] })
         } else {
           tid = await createTopic(catId, title, body)
@@ -648,7 +828,7 @@ async function renderTopics(catId, token) {
           </div>
         </div>
         <div class="topic-stat"><div class="n">${t.replyCount}</div><div class="l">replies</div></div>
-        <div class="topic-when">${esc(t.when)}</div>
+        <div class="topic-when">${esc(t.lastWhen)}${t.lastAuthor ? `<span class="lastby">${esc(t.lastAuthor)}</span>` : ''}</div>
       </div>`)
     const go = () => { location.hash = `#/${encodeURIComponent(catId)}/${encodeURIComponent(t.id)}` }
     row.addEventListener('click', go)
@@ -659,6 +839,17 @@ async function renderTopics(catId, token) {
 }
 
 // ---------------------------------------------------------------- view: topic
+function quoteInto(author, text) {
+  const ta = document.getElementById('reply-input')
+  if (!ta) { toast('Sign in to reply'); return }
+  const quoted = String(text).split('\n').slice(0, 12).map(l => `> ${l}`).join('\n')
+  const block = `> **@${author}** wrote:\n${quoted}\n\n`
+  ta.value = (ta.value ? ta.value.replace(/\s*$/, '') + '\n\n' : '') + block
+  ta.focus()
+  ta.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  try { ta.setSelectionRange(ta.value.length, ta.value.length) } catch {}
+}
+
 async function renderTopic(catId, topicId, token) {
   const cat = findCategory(catId)
   if (!cat) return renderMissing('Category not found')
@@ -685,44 +876,109 @@ async function renderTopic(catId, topicId, token) {
       <div class="meta">in <a href="#/${encodeURIComponent(cat.id)}">${esc(cat.name)}</a> · ${topic.posts.length} posts</div>
     </div>`))
 
+  const myId = currentIdentity()?.id
   topic.posts.forEach((p, i) => {
+    const isOp = i === 0
+    const mine = !state.demo && myId && p.authorId && p.authorId === myId
+    const acts = [`<button class="like${p.likedByMe ? ' liked' : ''}" data-act="like" title="Like">♥ <span class="like-n">${p.likeCount || ''}</span></button>`]
+    if (myId) acts.push('<button class="pact" data-act="quote">Quote</button>')
+    if (mine) {
+      acts.push('<button class="pact" data-act="edit">Edit</button>')
+      acts.push(`<button class="pact danger" data-act="del">${isOp ? 'Delete topic' : 'Delete'}</button>`)
+    }
     const post = el(`
-      <div class="post${i === 0 ? ' op' : ''}">
+      <div class="post${isOp ? ' op' : ''}">
         <div class="avatar" style="background:${avatarColor(p.author)}">${esc((p.author[0] || '?').toUpperCase())}</div>
         <div class="post-body">
           <div class="post-head">
             <span class="post-author">${esc(p.author)}</span>
             <span class="post-when">${esc(p.when)}</span>
+            ${p.edited ? '<span class="edited">· edited</span>' : ''}
             ${p.unsaved ? '<span class="unsaved">unsaved</span>' : ''}
           </div>
-          <div class="post-text">${esc(p.text)}</div>
-          <div class="post-actions">
-            <button class="like${p.likedByMe ? ' liked' : ''}" title="Like">♥ <span class="like-n">${p.likeCount || ''}</span></button>
-          </div>
+          <div class="post-text">${renderMarkdown(p.text)}</div>
+          <div class="post-actions">${acts.join('')}</div>
         </div>
       </div>`)
-    const likeBtn = post.querySelector('.like')
-    likeBtn.addEventListener('click', async () => {
-      if (!currentIdentity()) { toast('Sign in to like'); return }
-      likeBtn.disabled = true
-      try {
-        if (state.demo) {
-          p.likedByMe = !p.likedByMe
-          p.likeCount = Math.max(0, (p.likeCount || 0) + (p.likedByMe ? 1 : -1))
-          await render()
-        } else {
-          await toggleLike(cat.id, topic.id, p.id, p.likedByMe)
-          await render()
-        }
-      } catch (e) { toast('Like failed: ' + e.message); likeBtn.disabled = false }
+    post.querySelector('.post-actions').addEventListener('click', e => {
+      const btn = e.target.closest('[data-act]'); if (!btn) return
+      const act = btn.dataset.act
+      if (act === 'like') return doLike(p, btn, cat, topic)
+      if (act === 'quote') return quoteInto(p.author, p.text)
+      if (act === 'edit') return startEdit(post, p, isOp, cat, topic)
+      if (act === 'del') return doDelete(p, isOp, cat, topic)
     })
     app.appendChild(post)
   })
 
-  // we've now read the whole thread
   markSeen(catId, topicId, topic.posts.length - 1)
-
   app.appendChild(buildCompose(cat, topic))
+}
+
+async function doLike(p, btn, cat, topic) {
+  if (!currentIdentity()) { toast('Sign in to like'); return }
+  btn.disabled = true
+  try {
+    if (state.demo) {
+      p.likedByMe = !p.likedByMe
+      p.likeCount = Math.max(0, (p.likeCount || 0) + (p.likedByMe ? 1 : -1))
+      await render()
+    } else {
+      await toggleLike(cat.id, topic.id, p.id, p.likedByMe)
+      await render()
+    }
+  } catch (e) { toast('Like failed: ' + e.message); btn.disabled = false }
+}
+
+function startEdit(post, p, isOp, cat, topic) {
+  const textEl = post.querySelector('.post-text')
+  const actionsEl = post.querySelector('.post-actions')
+  const form = el(`
+    <div class="post-edit">
+      ${isOp ? `<input class="pe-title" type="text" maxlength="140">` : ''}
+      <textarea class="pe-body"></textarea>
+      <div class="compose-bar">
+        <button class="btn pe-save">Save</button>
+        <button class="btn btn-ghost pe-cancel">Cancel</button>
+      </div>
+    </div>`)
+  if (isOp) form.querySelector('.pe-title').value = topic.title
+  form.querySelector('.pe-body').value = p.text
+  textEl.style.display = 'none'
+  actionsEl.style.display = 'none'
+  textEl.after(form)
+  form.querySelector('.pe-body').focus()
+  form.querySelector('.pe-cancel').addEventListener('click', () => render())
+  form.querySelector('.pe-save').addEventListener('click', async () => {
+    const body = form.querySelector('.pe-body').value.trim()
+    const save = form.querySelector('.pe-save'); save.disabled = true; save.textContent = 'Saving…'
+    try {
+      if (isOp) {
+        const title = form.querySelector('.pe-title').value.trim() || topic.title
+        await savePost(p.url, { 'schema:headline': title, 'schema:text': body })
+      } else {
+        await savePost(p.url, { 'schema:text': body })
+      }
+      await render(); toast('Saved')
+    } catch (e) { toast('Save failed: ' + e.message); save.disabled = false; save.textContent = 'Save' }
+  })
+}
+
+async function doDelete(p, isOp, cat, topic) {
+  if (isOp) {
+    if (!confirm('Delete this whole topic and all its replies? This cannot be undone.')) return
+    try {
+      await deleteTopic(cat.id, topic.id)
+      toast('Topic deleted')
+      location.hash = `#/${encodeURIComponent(cat.id)}`
+    } catch (e) { toast('Delete failed: ' + e.message) }
+  } else {
+    if (!confirm('Delete this reply?')) return
+    try {
+      await deleteResource(p.url)
+      await render(); toast('Reply deleted')
+    } catch (e) { toast('Delete failed: ' + e.message) }
+  }
 }
 
 // reply composer — persists to the pod (or appends in-memory in demo)
@@ -730,10 +986,10 @@ function buildCompose(cat, topic) {
   const id = currentIdentity()
   const box = el(`
     <div class="compose">
-      <textarea placeholder="${id ? 'Write a reply…  (⌘/Ctrl+Enter to post)' : 'Sign in to reply…'}"${id ? '' : ' disabled'}></textarea>
+      <textarea id="reply-input" placeholder="${id ? 'Write a reply…  (markdown · ⌘/Ctrl+Enter to post)' : 'Sign in to reply…'}"${id ? '' : ' disabled'}></textarea>
       <div class="compose-bar">
         <button class="btn" ${id ? '' : 'disabled'}>Post reply</button>
-        <span class="cat-desc">${id ? (state.demo ? 'Demo — replies are in-memory only.' : 'Saved to the pod as JSON-LD.') : 'Sign in (top-right) to join the discussion.'}</span>
+        <span class="cat-desc">${id ? (state.demo ? 'Demo — replies are in-memory only.' : 'Saved to the pod as JSON-LD. Markdown supported.') : 'Sign in (top-right) to join the discussion.'}</span>
       </div>
     </div>`)
   if (!id) return box
@@ -750,7 +1006,7 @@ function buildCompose(cat, topic) {
         toast('Reply added (demo — not saved)')
       } else {
         await createReply(cat.id, topic.id, text)
-        await render() // re-fetch the thread, now including the saved reply
+        await render()
         toast('Reply posted')
       }
     } catch (e) {
@@ -797,13 +1053,10 @@ function wireSignIn() {
   document.getElementById('signout').addEventListener('click', () => {
     if (window.xlogin && window.xlogin.logout) window.xlogin.logout()
   })
-  // session changes: re-resolve the pod, forget caches, re-render
   document.addEventListener('xlogin', reload)
   document.addEventListener('xlogout', reload)
 }
 
-// resolve the right pod for the current session, then render fresh.
-// serialized so bootstrap + an xlogin event can't race two seed attempts.
 let reloadChain = Promise.resolve()
 function reload() {
   reloadChain = reloadChain.then(doReload, doReload)

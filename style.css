@@ -104,7 +104,20 @@ main { max-width: 920px; margin: 0 auto; padding: 26px 20px 60px; }
 .post-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
 .post-author { font-weight: 700; }
 .post-when { color: var(--faint); font-size: 12.5px; }
-.post-text { color: #2a2f3d; white-space: pre-wrap; word-wrap: break-word; }
+.edited { color: var(--faint); font-size: 12px; font-style: italic; }
+.post-text { color: #2a2f3d; word-wrap: break-word; overflow-wrap: anywhere; }
+.post-text p { margin: 0 0 10px; }
+.post-text p:last-child { margin-bottom: 0; }
+.post-text ul, .post-text ol { margin: 6px 0 10px; padding-left: 22px; }
+.post-text li { margin: 2px 0; }
+.post-text code { background: #f0f1f6; border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; font-size: 13px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.post-text .md-pre { background: #f7f8fb; border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; overflow-x: auto; margin: 4px 0 12px; }
+.post-text .md-pre code { background: none; border: 0; padding: 0; }
+.post-text blockquote { margin: 4px 0 12px; padding: 6px 14px; border-left: 3px solid var(--brand); background: var(--brand-soft); border-radius: 0 8px 8px 0; color: #44485a; }
+.post-text .md-h { margin: 6px 0 8px; line-height: 1.25; }
+.post-text h3.md-h { font-size: 19px; } .post-text h4.md-h { font-size: 16px; } .post-text h5.md-h { font-size: 14px; }
+.post-text a { word-break: break-all; }
+.mention { color: var(--brand); font-weight: 600; }
 
 /* new-topic inline form */
 .newtopic { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px 16px; margin-bottom: 18px; }
@@ -121,12 +134,37 @@ main { max-width: 920px; margin: 0 auto; padding: 26px 20px 60px; }
 .unsaved { background: #fff4e5; color: #9a5b00; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; }
 .new-pill { background: var(--brand); color: #fff; font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; vertical-align: middle; letter-spacing: .02em; }
 
-/* like button */
-.post-actions { margin-top: 10px; }
+/* post action row: like + quote + edit + delete */
+.post-actions { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; }
 .like { border: 1px solid var(--line); background: var(--panel); color: var(--muted); font: inherit; font-size: 13px; padding: 4px 11px; border-radius: 999px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
 .like:hover { border-color: #f0a; color: #e11d6b; }
 .like.liked { border-color: #f5b3cd; background: #fff0f6; color: #e11d6b; }
 .like-n { font-weight: 600; }
+.pact { border: 1px solid var(--line); background: var(--panel); color: var(--muted); font: inherit; font-size: 13px; padding: 4px 11px; border-radius: 999px; cursor: pointer; }
+.pact:hover { border-color: var(--brand); color: var(--brand); }
+.pact.danger:hover { border-color: #e11d48; color: #e11d48; }
+
+/* inline post edit */
+.post-edit { margin-top: 6px; }
+.post-edit .pe-title { width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; font: inherit; font-weight: 600; font-size: 16px; margin-bottom: 8px; }
+.post-edit .pe-body { width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font: inherit; resize: vertical; min-height: 90px; }
+.post-edit textarea:focus, .post-edit input:focus { outline: 2px solid var(--brand-soft); border-color: var(--brand); }
+
+/* topic-list last poster */
+.lastby { display: block; color: var(--faint); font-size: 12px; margin-top: 2px; }
+
+/* category edit icon + form */
+.icon-btn { border: 1px solid var(--line); background: var(--panel); color: var(--muted); width: 30px; height: 30px; border-radius: 8px; cursor: pointer; flex: none; font-size: 14px; line-height: 1; }
+.icon-btn:hover { border-color: var(--brand); color: var(--brand); }
+.catform { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px 16px; margin-bottom: 14px; }
+.catform-row { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
+.catform .cf-color { width: 40px; height: 38px; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: none; cursor: pointer; flex: none; }
+.catform .cf-name { flex: 1; border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; font: inherit; font-weight: 600; font-size: 16px; }
+.catform .cf-desc { width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; font: inherit; }
+.catform input:focus { outline: 2px solid var(--brand-soft); border-color: var(--brand); }
+/* edit form shown inside a category row breaks to full width */
+.row:has(.catform) { flex-wrap: wrap; }
+.row .catform { flex-basis: 100%; margin: 12px 0 0; box-shadow: none; border-color: var(--brand-soft); }
 
 /* ---- toast ---- */
 .toast {
