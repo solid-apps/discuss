@@ -119,6 +119,14 @@ main { max-width: 920px; margin: 0 auto; padding: 26px 20px 60px; }
 .compose-bar { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
 
 .unsaved { background: #fff4e5; color: #9a5b00; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; }
+.new-pill { background: var(--brand); color: #fff; font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; vertical-align: middle; letter-spacing: .02em; }
+
+/* like button */
+.post-actions { margin-top: 10px; }
+.like { border: 1px solid var(--line); background: var(--panel); color: var(--muted); font: inherit; font-size: 13px; padding: 4px 11px; border-radius: 999px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
+.like:hover { border-color: #f0a; color: #e11d6b; }
+.like.liked { border-color: #f5b3cd; background: #fff0f6; color: #e11d6b; }
+.like-n { font-weight: 600; }
 
 /* ---- toast ---- */
 .toast {

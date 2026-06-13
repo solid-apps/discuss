@@ -106,6 +106,15 @@ function relTime(iso) {
   return `${Math.floor(mo / 12)}y`
 }
 
+// unread tracking — remember how many replies we'd seen per topic (no extra fetches)
+const SEEN_KEY = 'discuss:seen'
+function loadSeen() { try { return JSON.parse(localStorage.getItem(SEEN_KEY) || '{}') } catch { return {} } }
+function seenCount(catId, topicId) { return loadSeen()[`${catId}/${topicId}`] }
+function markSeen(catId, topicId, replyCount) {
+  const m = loadSeen(); m[`${catId}/${topicId}`] = replyCount
+  try { localStorage.setItem(SEEN_KEY, JSON.stringify(m)) } catch {}
+}
+
 function newId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6) }
 function slug(s) {
   return String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'topic'
@@ -287,7 +296,10 @@ async function loadTopics(catId) {
       loadJson(`${dir}topic.jsonld`)
     ])
     if (!meta) return null
-    const replies = (inner || []).filter(u => u.endsWith('.jsonld') && !u.endsWith('/topic.jsonld'))
+    const replies = (inner || []).filter(u => {
+      const n = u.split('/').pop()
+      return u.endsWith('.jsonld') && n !== 'topic.jsonld' && !n.startsWith('like_')
+    })
     return {
       id: decodeURIComponent(id), catId,
       title: meta['schema:headline'] || meta.headline || '(untitled)',
@@ -311,28 +323,67 @@ async function loadTopic(catId, topicId) {
   const meta = await loadJson(`${dir}topic.jsonld`)
   if (!meta) return null
   const inner = (await listContainer(dir).catch(() => [])) || []
-  const replyUrls = inner.filter(u => u.endsWith('.jsonld') && !u.endsWith('/topic.jsonld'))
+  const files = inner.filter(u => u.endsWith('.jsonld'))
+  const nameOf = u => u.split('/').pop()
+  const replyUrls = files.filter(u => { const n = nameOf(u); return n !== 'topic.jsonld' && !n.startsWith('like_') })
+  const likeUrls = files.filter(u => nameOf(u).startsWith('like_'))
+
+  // tally likes: schema:object → { count, mine }
+  const myId = currentIdentity()?.id
+  const likeDocs = (await Promise.all(likeUrls.map(loadJson))).filter(Boolean)
+  const tally = {}
+  for (const l of likeDocs) {
+    const tgt = l['schema:object'] || l.object
+    if (!tgt) continue
+    const e = tally[tgt] || (tally[tgt] = { count: 0, mine: false })
+    e.count++
+    if (myId && (l['schema:agent'] || l.agent) === myId) e.mine = true
+  }
+  const likeInfo = id => ({ likeCount: tally[id]?.count || 0, likedByMe: !!tally[id]?.mine })
+
   const replies = (await Promise.all(replyUrls.map(async u => {
     const d = await loadJson(u)
     if (!d) return null
+    const id = nameOf(u).replace(/\.jsonld$/, '')
     return {
+      id,
       author: displayName(d['schema:author'] || d.author),
       text: d['schema:text'] || d.text || '',
       date: d['schema:datePublished'] || d.datePublished || '',
-      when: relTime(d['schema:datePublished'] || d.datePublished)
+      when: relTime(d['schema:datePublished'] || d.datePublished),
+      ...likeInfo(id)
     }
   }))).filter(Boolean).sort((a, b) => (a.date || '').localeCompare(b.date || ''))
   const op = {
+    id: 'op',
     author: displayName(meta['schema:author']),
     text: meta['schema:text'] || '',
     when: relTime(meta['schema:datePublished']),
-    date: meta['schema:datePublished'] || ''
+    date: meta['schema:datePublished'] || '',
+    ...likeInfo('op')
   }
   return {
     id: topicId, catId,
     title: meta['schema:headline'] || '(untitled)',
     pinned: !!meta['discuss:pinned'],
     posts: [op, ...replies]
+  }
+}
+
+// toggle a like as an append-only LikeAction doc (one file per user per target)
+async function toggleLike(catId, topicId, target, liked) {
+  const id = currentIdentity()
+  if (!id) throw new Error('not signed in')
+  const url = `${CATS_BASE}${encodeURIComponent(catId)}/${encodeURIComponent(topicId)}/like_${target}_${slug(id.id)}.jsonld`
+  if (liked) {
+    const res = await authFetch(url, { method: 'DELETE' })
+    if (!res.ok && res.status !== 404) throw new Error(`DELETE → ${res.status}`)
+  } else {
+    await put(url, {
+      '@context': CTX, '@type': 'schema:LikeAction',
+      'schema:agent': id.id, 'schema:object': target,
+      'schema:datePublished': new Date().toISOString()
+    })
   }
 }
 
@@ -517,10 +568,14 @@ async function renderTopics(catId, token) {
   }
   const list = el('<div class="list"></div>')
   for (const t of topics) {
+    const seen = seenCount(catId, t.id)
+    let badge = ''
+    if (seen === undefined) badge = '<span class="new-pill">new</span>'
+    else if (t.replyCount > seen) badge = `<span class="new-pill">${t.replyCount - seen} new</span>`
     const row = el(`
       <div class="row" role="link" tabindex="0">
         <div class="topic-main">
-          <div class="topic-title">${t.pinned ? '📌 ' : ''}${esc(t.title)}</div>
+          <div class="topic-title">${t.pinned ? '📌 ' : ''}${esc(t.title)} ${badge}</div>
           <div class="topic-sub">
             <span class="pill">${esc(cat.name)}</span>
             <span>by ${esc(t.author)}</span>
@@ -565,7 +620,7 @@ async function renderTopic(catId, topicId, token) {
     </div>`))
 
   topic.posts.forEach((p, i) => {
-    app.appendChild(el(`
+    const post = el(`
       <div class="post${i === 0 ? ' op' : ''}">
         <div class="avatar" style="background:${avatarColor(p.author)}">${esc((p.author[0] || '?').toUpperCase())}</div>
         <div class="post-body">
@@ -575,9 +630,31 @@ async function renderTopic(catId, topicId, token) {
             ${p.unsaved ? '<span class="unsaved">unsaved</span>' : ''}
           </div>
           <div class="post-text">${esc(p.text)}</div>
+          <div class="post-actions">
+            <button class="like${p.likedByMe ? ' liked' : ''}" title="Like">♥ <span class="like-n">${p.likeCount || ''}</span></button>
+          </div>
         </div>
-      </div>`))
+      </div>`)
+    const likeBtn = post.querySelector('.like')
+    likeBtn.addEventListener('click', async () => {
+      if (!currentIdentity()) { toast('Sign in to like'); return }
+      likeBtn.disabled = true
+      try {
+        if (state.demo) {
+          p.likedByMe = !p.likedByMe
+          p.likeCount = Math.max(0, (p.likeCount || 0) + (p.likedByMe ? 1 : -1))
+          await render()
+        } else {
+          await toggleLike(cat.id, topic.id, p.id, p.likedByMe)
+          await render()
+        }
+      } catch (e) { toast('Like failed: ' + e.message); likeBtn.disabled = false }
+    })
+    app.appendChild(post)
   })
+
+  // we've now read the whole thread
+  markSeen(catId, topicId, topic.posts.length - 1)
 
   app.appendChild(buildCompose(cat, topic))
 }

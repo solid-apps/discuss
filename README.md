@@ -18,6 +18,7 @@ Shared-pod, multi-user: one pod hosts the forum, any authenticated user can post
 /public/discuss/index.jsonld                     forum meta + category list
 /public/discuss/c/<cat>/<topicId>/topic.jsonld   the opening post
 /public/discuss/c/<cat>/<topicId>/<postId>.jsonld one file per reply (append-only)
+/public/discuss/c/<cat>/<topicId>/like_<target>_<user>.jsonld  one file per like
 /public/discuss/.acl                             owner Control; AuthenticatedAgent Append
 ```
 
@@ -26,7 +27,7 @@ other — the container just collects everyone's docs.
 
 ## Status
 
-MVP, built in phases. Checkpoints:
+MVP complete — full read/write on a pod. Built in phases:
 
 - [x] **1. Scaffold** — light-theme Discourse layout, three views (Categories → Topics →
   Topic thread) over hardcoded sample data, hash router.
@@ -38,7 +39,10 @@ MVP, built in phases. Checkpoints:
   PUTs `c/<cat>/<topicId>/topic.jsonld`.
 - [x] **5. Replies** — topic thread reads every reply doc in the container and renders them
   chronologically; the composer PUTs one JSON-LD `schema:Comment` per reply (append-only).
-- [ ] **6. Polish** — relative activity times, likes, new/unread badges.
+- [x] **6. Polish** — relative activity times; per-post **likes** (append-only
+  `schema:LikeAction` docs, one file per user per post, toggle = PUT/DELETE);
+  **new/unread** badges on the topic list (tracked in `localStorage` by reply count,
+  no extra fetches).
 
 ## Run
 
