@@ -30,12 +30,15 @@ MVP, built in phases. Checkpoints:
 
 - [x] **1. Scaffold** — light-theme Discourse layout, three views (Categories → Topics →
   Topic thread) over hardcoded sample data, hash router.
-- [x] **2. Auth** — xlogin wired up; header shows identity (avatar + name + sign-out);
-  compose box enabled when signed in (replies are in-memory until Phase 5).
-- [ ] **3. Categories** — read/write `/public/discuss/index.jsonld` + seed `.acl`.
-- [ ] **4. Topics** — per-category container; list + create topics.
-- [ ] **5. Replies** — topic thread reads reply docs; compose appends a JSON-LD post.
-- [ ] **6. Polish** — likes, relative activity times, new/unread badges.
+- [x] **2. Auth** — xlogin wired up; header shows identity (avatar + name + sign-out).
+- [x] **3. Categories** — categories read from `/public/discuss/index.jsonld`; a fresh
+  forum is seeded (index + `.acl` + a welcome topic) on the owner's first visit. Opened
+  without a writable pod (e.g. github.io, signed out) it falls back to a read-only demo.
+- [x] **4. Topics** — per-category container; topic list + inline **New topic** form that
+  PUTs `c/<cat>/<topicId>/topic.jsonld`.
+- [x] **5. Replies** — topic thread reads every reply doc in the container and renders them
+  chronologically; the composer PUTs one JSON-LD `schema:Comment` per reply (append-only).
+- [ ] **6. Polish** — relative activity times, likes, new/unread badges.
 
 ## Run
 

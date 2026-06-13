@@ -106,7 +106,13 @@ main { max-width: 920px; margin: 0 auto; padding: 26px 20px 60px; }
 .post-when { color: var(--faint); font-size: 12.5px; }
 .post-text { color: #2a2f3d; white-space: pre-wrap; word-wrap: break-word; }
 
-/* compose (disabled in scaffold) */
+/* new-topic inline form */
+.newtopic { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px 16px; margin-bottom: 18px; }
+.newtopic .nt-title { width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font: inherit; font-weight: 600; font-size: 16px; margin-bottom: 10px; }
+.newtopic .nt-body { width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font: inherit; resize: vertical; min-height: 96px; }
+.newtopic input:focus, .newtopic textarea:focus { outline: 2px solid var(--brand-soft); border-color: var(--brand); }
+
+/* compose */
 .compose { margin-top: 6px; }
 .compose textarea { width: 100%; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; font: inherit; resize: vertical; min-height: 84px; }
 .compose textarea:focus { outline: 2px solid var(--brand-soft); border-color: var(--brand); }
