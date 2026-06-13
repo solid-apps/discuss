@@ -92,6 +92,41 @@ function avatarColor(name) {
   return `hsl(${h}, 52%, 52%)`
 }
 
+// ---------------------------------------------------------------- identity
+// xlogin gives us window.xlogin.{id, type, authFetch, login, logout, ready}.
+function currentIdentity() {
+  if (!window.xlogin || !window.xlogin.id) return null
+  return { type: window.xlogin.type, id: window.xlogin.id }
+}
+
+// short, human label for a WebID URL or a nostr key
+function displayName(id, type) {
+  if (!id) return 'me'
+  if (type === 'nostr') return id.length > 14 ? id.slice(0, 10) + '…' : id
+  try {
+    const u = new URL(id)
+    const seg = u.pathname.split('/').filter(Boolean).pop()
+    return (seg || u.hostname).replace(/#.*$/, '')
+  } catch { return id }
+}
+
+// authenticated fetch when signed in, plain fetch otherwise (used from Phase 3 on)
+function authFetch(url, opts) {
+  if (window.xlogin && window.xlogin.id && window.xlogin.authFetch) {
+    return window.xlogin.authFetch(url, opts)
+  }
+  return fetch(url, opts)
+}
+
+function toast(msg) {
+  let t = document.querySelector('.toast')
+  if (!t) { t = document.createElement('div'); t.className = 'toast'; document.body.appendChild(t) }
+  t.textContent = msg
+  t.classList.add('show')
+  clearTimeout(t._tid)
+  t._tid = setTimeout(() => t.classList.remove('show'), 2200)
+}
+
 const findCategory = id => SAMPLE.categories.find(c => c.id === id)
 const findTopic = (cat, id) => cat && cat.topics.find(t => t.id === id)
 
@@ -219,6 +254,7 @@ function renderTopic(catId, topicId) {
           <div class="post-head">
             <span class="post-author">${esc(p.author)}</span>
             <span class="post-when">${esc(p.when)}</span>
+            ${p.unsaved ? '<span class="unsaved">unsaved</span>' : ''}
           </div>
           <div class="post-text">${esc(p.text)}</div>
         </div>
@@ -226,15 +262,39 @@ function renderTopic(catId, topicId) {
     app.appendChild(post)
   })
 
-  // compose box — visible but disabled until auth/posting phases
-  app.appendChild(el(`
+  app.appendChild(buildCompose(topic))
+}
+
+// compose box — enabled when signed in. Posting appends to the in-memory thread
+// (Phase 2). Persisting to the pod as JSON-LD lands in Phase 5.
+function buildCompose(topic) {
+  const id = currentIdentity()
+  const box = el(`
     <div class="compose">
-      <textarea placeholder="Replying is enabled once sign-in &amp; posting land (Phase 2–5)…" disabled></textarea>
+      <textarea placeholder="${id ? 'Write a reply…' : 'Sign in to reply…'}"${id ? '' : ' disabled'}></textarea>
       <div class="compose-bar">
-        <button class="btn" disabled>Post reply</button>
-        <span class="cat-desc">Read-only scaffold — your reply will save as JSON-LD on the pod.</span>
+        <button class="btn" ${id ? '' : 'disabled'}>Post reply</button>
+        <span class="cat-desc">${id ? 'Stored in-memory for now — saving to your pod lands in Phase 5.' : 'Sign in (top-right) to join the discussion.'}</span>
       </div>
-    </div>`))
+    </div>`)
+  if (!id) return box
+  const ta = box.querySelector('textarea')
+  const btn = box.querySelector('button')
+  const submit = () => {
+    const text = ta.value.trim()
+    if (!text) return
+    topic.posts.push({
+      author: displayName(id.id, id.type), when: 'just now', text, unsaved: true
+    })
+    topic.replyCount = topic.posts.length - 1
+    render() // re-render the thread with the new post
+    toast('Reply added (not yet saved to pod)')
+  }
+  btn.addEventListener('click', submit)
+  ta.addEventListener('keydown', e => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') submit()
+  })
+  return box
 }
 
 const t_pin = t => (t.pinned ? '📌 ' : '')
@@ -245,30 +305,44 @@ function renderMissing(msg) {
   app.appendChild(el(`<div class="notice">${esc(msg)}. <a href="#/">Back to categories</a>.</div>`))
 }
 
-// ----------------------------------------------------- sign-in (placeholder)
-function wireSignIn() {
-  const btn = document.getElementById('signin')
-  const idEl = document.getElementById('topbar-id')
-  function refresh() {
-    if (window.xlogin && window.xlogin.id) {
-      btn.hidden = true
-      idEl.hidden = false
-      idEl.textContent = window.xlogin.id
-    } else {
-      btn.hidden = false
-      idEl.hidden = true
-    }
+// --------------------------------------------------------------- sign-in
+function refreshAccount() {
+  const signinBtn = document.getElementById('signin')
+  const account = document.getElementById('account')
+  const id = currentIdentity()
+  if (id) {
+    const name = displayName(id.id, id.type)
+    signinBtn.hidden = true
+    account.hidden = false
+    const av = document.getElementById('me-avatar')
+    av.textContent = name[0].toUpperCase()
+    av.style.background = avatarColor(name)
+    document.getElementById('me-name').textContent = name
+    document.getElementById('me-name').title = id.id
+  } else {
+    signinBtn.hidden = false
+    account.hidden = true
   }
-  btn.addEventListener('click', () => {
+}
+
+function wireSignIn() {
+  document.getElementById('signin').addEventListener('click', () => {
     if (window.xlogin && window.xlogin.login) window.xlogin.login()
-    else alert('Sign-in wiring lands in Phase 2. This scaffold is read-only sample data.')
+    else toast('xlogin not available — open this app from a pod.')
   })
-  // xlogin may fire an event when ready/changed; refresh defensively too.
-  window.addEventListener('xlogin', refresh)
-  refresh()
+  document.getElementById('signout').addEventListener('click', () => {
+    if (window.xlogin && window.xlogin.logout) window.xlogin.logout()
+  })
+  // xlogin fires these on `document` when the session changes.
+  document.addEventListener('xlogin', () => { refreshAccount(); render() })
+  document.addEventListener('xlogout', () => { refreshAccount(); render() })
 }
 
 // ----------------------------------------------------------------- bootstrap
 window.addEventListener('hashchange', render)
-wireSignIn()
-render()
+wireSignIn();
+(async () => {
+  try { if (window.xlogin && window.xlogin.ready) await window.xlogin.ready } catch {}
+  refreshAccount()
+  render()
+})()

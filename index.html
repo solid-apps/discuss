@@ -22,7 +22,11 @@
       <nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
       <div class="topbar-spacer"></div>
       <button class="signin" id="signin">Sign in</button>
-      <span class="topbar-id" id="topbar-id" hidden></span>
+      <div class="account" id="account" hidden>
+        <span class="avatar-sm" id="me-avatar">?</span>
+        <span class="me-name" id="me-name"></span>
+        <button class="signout" id="signout" title="Sign out">Sign out</button>
+      </div>
     </div>
   </header>
 
@@ -30,7 +34,7 @@
 
   <footer class="foot">
     <span>discuss · threaded forum on your <a href="https://solidproject.org">Solid</a> pod</span>
-    <span class="foot-phase">Phase 1 · scaffold (sample data)</span>
+    <span class="foot-phase">Phase 2 · xlogin sign-in (sample data)</span>
   </footer>
 
   <script src="app.js"></script>

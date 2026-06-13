@@ -50,7 +50,11 @@ a:hover { text-decoration: underline; }
   cursor: pointer;
 }
 .signin:hover { border-color: var(--brand); color: var(--brand); }
-.topbar-id { font-size: 13px; color: var(--muted); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account { display: flex; align-items: center; gap: 8px; }
+.avatar-sm { width: 26px; height: 26px; border-radius: 50%; flex: none; display: grid; place-items: center; color: #fff; font-weight: 700; font-size: 12.5px; background: var(--brand); }
+.me-name { font-size: 13.5px; color: var(--ink); font-weight: 600; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.signout { border: 1px solid var(--line); background: var(--panel); color: var(--muted); padding: 5px 10px; border-radius: 999px; font: inherit; font-size: 12.5px; cursor: pointer; }
+.signout:hover { border-color: var(--brand); color: var(--brand); }
 
 /* ---- layout ---- */
 main { max-width: 920px; margin: 0 auto; padding: 26px 20px 60px; }
@@ -107,6 +111,16 @@ main { max-width: 920px; margin: 0 auto; padding: 26px 20px 60px; }
 .compose textarea { width: 100%; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; font: inherit; resize: vertical; min-height: 84px; }
 .compose textarea:focus { outline: 2px solid var(--brand-soft); border-color: var(--brand); }
 .compose-bar { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+
+.unsaved { background: #fff4e5; color: #9a5b00; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; }
+
+/* ---- toast ---- */
+.toast {
+  position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%) translateY(12px);
+  background: #1f2330; color: #fff; padding: 10px 16px; border-radius: 999px; font-size: 13.5px;
+  box-shadow: 0 6px 24px rgba(20, 24, 40, .25); opacity: 0; pointer-events: none; transition: all .22s ease; z-index: 50;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
 /* ---- misc ---- */
 .notice { background: #fffaf0; border: 1px solid #f3e2bd; color: #7a5b14; border-radius: 12px; padding: 10px 14px; font-size: 13.5px; margin-bottom: 18px; }

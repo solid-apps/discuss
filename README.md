@@ -30,7 +30,8 @@ MVP, built in phases. Checkpoints:
 
 - [x] **1. Scaffold** — light-theme Discourse layout, three views (Categories → Topics →
   Topic thread) over hardcoded sample data, hash router.
-- [ ] **2. Auth** — xlogin wired up; header shows identity; compose box enabled.
+- [x] **2. Auth** — xlogin wired up; header shows identity (avatar + name + sign-out);
+  compose box enabled when signed in (replies are in-memory until Phase 5).
 - [ ] **3. Categories** — read/write `/public/discuss/index.jsonld` + seed `.acl`.
 - [ ] **4. Topics** — per-category container; list + create topics.
 - [ ] **5. Replies** — topic thread reads reply docs; compose appends a JSON-LD post.
